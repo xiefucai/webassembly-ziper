@@ -1,0 +1,15 @@
+{
+  "name": "webassembly-ziper",
+  "version": "0.1.0",
+  "description": "A WebAssembly implementation of JSZip with compatible API",
+  "main": "pkg/webassembly_ziper.js",
+  "types": "pkg/webassembly_ziper.d.ts",
+  "scripts": {
+    "build": "wasm-pack build --target web --release",
+    "build:dev": "wasm-pack build --target web --dev",
+    "demo": "python -m http.server 8080 -d demo",
+    "demo:node": "npx serve demo"
+  },
+  "keywords": ["zip", "webassembly", "jszip", "compression"],
+  "license": "MIT"
+}

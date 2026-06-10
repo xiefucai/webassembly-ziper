@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebAssembly-Ziper Demo</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
+            padding: 20px;
+        }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { text-align: center; color: #2c3e50; margin-bottom: 10px; }
+        h2 { color: #34495e; margin: 20px 0 10px; border-bottom: 2px solid #3498db; padding-bottom: 5px; }
+        .subtitle { text-align: center; color: #7f8c8d; margin-bottom: 30px; }
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+            transition: background 0.2s;
+        }
+        .btn:hover { background: #2980b9; }
+        .btn:disabled { background: #bdc3c7; cursor: not-allowed; }
+        .btn-success { background: #27ae60; }
+        .btn-success:hover { background: #219a52; }
+        .btn-danger { background: #e74c3c; }
+        .btn-danger:hover { background: #c0392b; }
+        pre {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            font-size: 13px;
+            margin: 10px 0;
+        }
+        code { font-family: 'Fira Code', 'Consolas', monospace; }
+        .output {
+            background: #ecf0f1;
+            padding: 15px;
+            border-radius: 5px;
+            min-height: 50px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .status { padding: 10px; border-radius: 5px; margin: 10px 0; }
+        .status.loading { background: #fff3cd; color: #856404; }
+        .status.success { background: #d4edda; color: #155724; }
+        .status.error { background: #f8d7da; color: #721c24; }
+        .file-input-wrapper { margin: 10px 0; }
+        .file-input-wrapper input[type="file"] { margin-right: 10px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
+        .tag {
+            display: inline-block;
+            background: #e8f4fd;
+            color: #2980b9;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            margin-right: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WebAssembly-Ziper</h1>
+        <p class="subtitle">A WebAssembly implementation of JSZip with compatible API</p>
+
+        <div id="loadingStatus" class="status loading">
+            Loading WebAssembly module...
+        </div>
+
+        <!-- Example 1: Create a simple zip -->
+        <div class="card">
+            <h2>1. Create a Simple Zip</h2>
+            <p>Add files and folders, then generate a zip archive.</p>
+            <pre><code>const zip = new JSZip();
+zip.file("hello.txt", "Hello World\n");
+zip.folder("images").file("logo.png", imageData);
+const content = await zip.generateAsync({type: "uint8array"});</code></pre>
+            <button class="btn" id="btnCreateSimple" disabled>Create & Download Zip</button>
+            <button class="btn" id="btnCreateWithCompression" disabled>Create with DEFLATE</button>
+            <div class="output" id="output1">Click a button to create a zip...</div>
+        </div>
+
+        <!-- Example 2: Read a zip file -->
+        <div class="card">
+            <h2>2. Read an Existing Zip File</h2>
+            <p>Upload a .zip file and see its contents.</p>
+            <div class="file-input-wrapper">
+                <input type="file" id="zipFileInput" accept=".zip">
+                <button class="btn" id="btnReadZip" disabled>Read Zip</button>
+            </div>
+            <div class="output" id="output2">Upload a zip file to see its contents...</div>
+        </div>
+
+        <!-- Example 3: Modify a zip -->
+        <div class="card">
+            <h2>3. Modify an Existing Zip</h2>
+            <p>Load a zip, add files, remove files, and regenerate.</p>
+            <pre><code>const zip = await new JSZip().loadAsync(zipData);
+zip.file("new-file.txt", "New content");
+zip.remove("old-file.txt");
+const updated = await zip.generateAsync({type: "uint8array"});</code></pre>
+            <button class="btn" id="btnModifyDemo" disabled>Run Modify Demo</button>
+            <div class="output" id="output3">Click to run the modify demo...</div>
+        </div>
+
+        <!-- Example 4: forEach and filter -->
+        <div class="card">
+            <h2>4. Iterate and Filter Files</h2>
+            <p>Use forEach and filter to work with zip contents.</p>
+            <pre><code>zip.forEach((path, file) => console.log(path, file));
+const txtFiles = zip.filter((path, file) => path.endsWith('.txt'));</code></pre>
+            <button class="btn" id="btnIterateDemo" disabled>Run Iterate Demo</button>
+            <div class="output" id="output4">Click to run the iterate demo...</div>
+        </div>
+
+        <!-- Example 5: Nested folders -->
+        <div class="card">
+            <h2>5. Nested Folders</h2>
+            <p>Create complex folder structures.</p>
+            <pre><code>zip.folder("project")
+   .folder("src")
+   .file("main.js", "console.log('hi')");
+zip.folder("project/docs").file("README.md", "# Project");</code></pre>
+            <button class="btn" id="btnNestedDemo" disabled>Create Nested Zip</button>
+            <div class="output" id="output5">Click to create a nested zip...</div>
+        </div>
+
+        <!-- Example 6: Read file content async -->
+        <div class="card">
+            <h2>6. Read File Content (ZipObject.async)</h2>
+            <p>Extract individual file contents from a zip.</p>
+            <pre><code>const file = zip.file("hello.txt");
+const content = await file.async("string");
+const bytes = await file.async("uint8array");</code></pre>
+            <button class="btn" id="btnReadFileDemo" disabled>Run Read File Demo</button>
+            <div class="output" id="output6">Click to run the read file demo...</div>
+        </div>
+    </div>
+
+    <script type="module">
+        import init, { JSZip, version } from './pkg/webassembly_ziper.js';
+
+        let JSZipClass;
+
+        // Initialize WASM
+        async function initWasm() {
+            try {
+                await init();
+                JSZipClass = JSZip;
+                document.getElementById('loadingStatus').className = 'status success';
+                document.getElementById('loadingStatus').textContent = `WebAssembly loaded! Version: ${version()}`;
+
+                // Enable all buttons
+                document.querySelectorAll('.btn').forEach(btn => btn.disabled = false);
+            } catch (err) {
+                document.getElementById('loadingStatus').className = 'status error';
+                document.getElementById('loadingStatus').textContent = `Failed to load WASM: ${err.message}`;
+                console.error(err);
+            }
+        }
+
+        initWasm();
+
+        // Helper: download bytes as a file
+        function downloadBlob(bytes, filename) {
+            const blob = new Blob([bytes], { type: 'application/zip' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // Helper: format file list
+        function formatFileList(zip) {
+            let output = 'Files in zip:\n';
+            zip.forEach((path, file) => {
+                const type = file.dir ? '[DIR]' : '[FILE]';
+                output += `  ${type} ${path}\n`;
+            });
+            return output;
+        }
+
+        // Example 1: Create simple zip
+        document.getElementById('btnCreateSimple').addEventListener('click', async () => {
+            const output = document.getElementById('output1');
+            try {
+                const zip = new JSZipClass();
+                zip.file("hello.txt", "Hello World from WebAssembly-Ziper!\n");
+                zip.file("nested/folder/file.txt", "This file is in a nested folder.\n");
+                zip.folder("images").file("readme.txt", "This would be an image.\n");
+
+                output.textContent = 'Generating zip...\n';
+                const content = await zip.generateAsync({ type: "uint8array" });
+                output.textContent = formatFileList(zip) + `\nGenerated ${content.length} bytes\nDownloading hello.zip...`;
+                downloadBlob(content, "hello.zip");
+            } catch (err) {
+                output.textContent = `Error: ${err.message}`;
+            }
+        });
+
+        // Example 1b: Create with compression
+        document.getElementById('btnCreateWithCompression').addEventListener('click', async () => {
+            const output = document.getElementById('output1');
+            try {
+                const zip = new JSZipClass();
+                // Generate some repetitive text that compresses well
+                const longText = "Lorem ipsum dolor sit amet. ".repeat(100);
+                zip.file("compressed.txt", longText, { compression: "DEFLATE", compressionOptions: { level: 9 } });
+
+                output.textContent = 'Generating compressed zip...\n';
+                const content = await zip.generateAsync({ type: "uint8array" });
+                output.textContent = formatFileList(zip) + `\nGenerated ${content.length} bytes (DEFLATE level 9)\nDownloading compressed.zip...`;
+                downloadBlob(content, "compressed.zip");
+            } catch (err) {
+                output.textContent = `Error: ${err.message}`;
+            }
+        });
+
+        // Example 2: Read a zip file
+        document.getElementById('btnReadZip').addEventListener('click', async () => {
+            const output = document.getElementById('output2');
+            const input = document.getElementById('zipFileInput');
+
+            if (!input.files.length) {
+                output.textContent = 'Please select a zip file first.';
+                return;
+            }
+
+            try {
+                const file = input.files[0];
+                const arrayBuffer = await file.arrayBuffer();
+                const uint8Array = new Uint8Array(arrayBuffer);
+
+                const zip = new JSZipClass();
+                const loadedZip = await zip.loadAsync(uint8Array);
+
+                let result = `Loaded: ${file.name}\n`;
+                result += `Comment: ${loadedZip.comment || '(none)'}\n\n`;
+                result += formatFileList(loadedZip);
+
+                output.textContent = result;
+            } catch (err) {
+                output.textContent = `Error reading zip: ${err.message}`;
+            }
+        });
+
+        // Example 3: Modify a zip
+        document.getElementById('btnModifyDemo').addEventListener('click', async () => {
+            const output = document.getElementById('output3');
+            try {
+                // First create a base zip
+                const zip = new JSZipClass();
+                zip.file("existing.txt", "This file already existed.\n");
+                zip.file("to-remove.txt", "This file will be removed.\n");
+                const baseZip = await zip.generateAsync({ type: "uint8array" });
+
+                // Now load and modify
+                const newZip = new JSZipClass();
+                const loadedZip = await newZip.loadAsync(baseZip);
+
+                loadedZip.file("new-file.txt", "This is a new file!\n");
+                loadedZip.remove("to-remove.txt");
+                loadedZip.comment = "Modified by WebAssembly-Ziper!";
+
+                const modified = await loadedZip.generateAsync({ type: "uint8array" });
+
+                output.textContent = formatFileList(loadedZip) +
+                    `\nComment: ${loadedZip.comment}` +
+                    `\nGenerated ${modified.length} bytes\nDownloading modified.zip...`;
+
+                downloadBlob(modified, "modified.zip");
+            } catch (err) {
+                output.textContent = `Error: ${err.message}`;
+            }
+        });
+
+        // Example 4: Iterate and filter
+        document.getElementById('btnIterateDemo').addEventListener('click', async () => {
+            const output = document.getElementById('output4');
+            try {
+                const zip = new JSZipClass();
+                zip.file("readme.txt", "Read me!");
+                zip.file("notes.txt", "Some notes.");
+                zip.file("data.json", '{"key": "value"}');
+                zip.file("src/main.rs", "fn main() {}");
+                zip.file("src/lib.rs", "pub fn lib() {}");
+                zip.folder("docs").file("guide.md", "# Guide");
+
+                let result = '=== forEach ===\n';
+                zip.forEach((path, file) => {
+                    result += `  ${file.dir ? '[DIR]' : '[FILE]'} ${path}\n`;
+                });
+
+                result += '\n=== filter (only .txt files) ===\n';
+                const txtFiles = zip.filter((path, file) => path.endsWith('.txt'));
+                for (let i = 0; i < txtFiles.length; i++) {
+                    result += `  ${txtFiles[i].name}\n`;
+                }
+
+                result += '\n=== filter (only folders) ===\n';
+                const folders = zip.filter((path, file) => file.dir);
+                for (let i = 0; i < folders.length; i++) {
+                    result += `  ${folders[i].name}\n`;
+                }
+
+                output.textContent = result;
+            } catch (err) {
+                output.textContent = `Error: ${err.message}`;
+            }
+        });
+
+        // Example 5: Nested folders
+        document.getElementById('btnNestedDemo').addEventListener('click', async () => {
+            const output = document.getElementById('output5');
+            try {
+                const zip = new JSZipClass();
+
+                // Method 1: Using nested folder calls
+                const src = zip.folder("project").folder("src");
+                src.file("main.js", "console.log('Hello from WebAssembly!');");
+                src.file("utils.js", "export function add(a, b) { return a + b; }");
+
+                // Method 2: Using path strings
+                zip.file("project/docs/README.md", "# My Project\n\nThis is a demo.");
+                zip.file("project/package.json", JSON.stringify({ name: "my-project", version: "1.0.0" }, null, 2));
+                zip.file("project/.gitignore", "node_modules/\ndist/\n");
+
+                const content = await zip.generateAsync({
+                    type: "uint8array",
+                    compression: "DEFLATE",
+                    compressionOptions: { level: 6 }
+                });
+
+                output.textContent = formatFileList(zip) +
+                    `\n\nGenerated ${content.length} bytes\nDownloading project.zip...`;
+
+                downloadBlob(content, "project.zip");
+            } catch (err) {
+                output.textContent = `Error: ${err.message}`;
+            }
+        });
+
+        // Example 6: Read file content
+        document.getElementById('btnReadFileDemo').addEventListener('click', async () => {
+            const output = document.getElementById('output6');
+            try {
+                const zip = new JSZipClass();
+                zip.file("hello.txt", "Hello from WASM!");
+                zip.file("data.json", '{"name": "webassembly-ziper", "version": "0.1.0"}');
+                zip.file("binary.bin", new Uint8Array([0x00, 0x01, 0x02, 0xFF, 0xFE, 0xFD]));
+
+                let result = '=== Read as string ===\n';
+                const helloFile = zip.file("hello.txt");
+                const helloContent = await helloFile.async("string");
+                result += `hello.txt: "${helloContent}"\n`;
+
+                result += '\n=== Read as JSON (parsed) ===\n';
+                const jsonFile = zip.file("data.json");
+                const jsonContent = await jsonFile.async("string");
+                result += `data.json: ${JSON.stringify(JSON.parse(jsonContent), null, 2)}\n`;
+
+                result += '\n=== Read as uint8array ===\n';
+                const binFile = zip.file("binary.bin");
+                const binContent = await binFile.async("uint8array");
+                result += `binary.bin: [${Array.from(binContent).join(', ')}]\n`;
+
+                result += '\n=== Read as base64 ===\n';
+                const base64Content = await helloFile.async("base64");
+                result += `hello.txt (base64): ${base64Content}\n`;
+
+                // Also test files getter
+                result += '\n=== zip.files object ===\n';
+                const filesObj = zip.files;
+                for (const key of Object.keys(filesObj)) {
+                    result += `  ${key}: dir=${filesObj[key].dir}\n`;
+                }
+
+                output.textContent = result;
+            } catch (err) {
+                output.textContent = `Error: ${err.message}`;
+            }
+        });
+    </script>
+</body>
+</html>
