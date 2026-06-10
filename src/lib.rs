@@ -1,7 +1,9 @@
 use js_sys::{Array, Object, Promise, RegExp, Uint8Array};
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{Cursor, Read, Write};
+use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::future_to_promise;
 
@@ -229,6 +231,29 @@ impl ZipObject {
                     let engine = base64::engine::general_purpose::STANDARD;
                     Ok(JsValue::from(engine.encode(&data)))
                 }
+                "array" => {
+                    let arr = js_sys::Array::new();
+                    for b in &data {
+                        arr.push(&JsValue::from(*b));
+                    }
+                    Ok(arr.into())
+                }
+                "blob" => {
+                    let u8arr = Uint8Array::from(data.as_slice());
+                    let array = js_sys::Array::new();
+                    array.push(&u8arr);
+                    let options = web_sys::BlobPropertyBag::new();
+                    options.set_type("application/octet-stream");
+                    let blob = web_sys::Blob::new_with_buffer_source_sequence_and_options(
+                        array.as_ref(),
+                        &options,
+                    )
+                        .map_err(|_| JsValue::from_str("Failed to create Blob"))?;
+                    Ok(blob.into())
+                }
+                "nodebuffer" => {
+                    Ok(Uint8Array::from(data.as_slice()).into())
+                }
                 _ => Err(JsValue::from_str(&format!("Unsupported type: {}", type_str))),
             }
         })
@@ -240,7 +265,7 @@ impl ZipObject {
 // ---------------------------------------------------------------------------
 #[wasm_bindgen]
 pub struct JSZip {
-    files: HashMap<String, ZipEntry>,
+    files: Rc<RefCell<HashMap<String, ZipEntry>>>,
     comment: String,
     current_folder: String,
 }
@@ -250,7 +275,7 @@ impl JSZip {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
         Self {
-            files: HashMap::new(),
+            files: Rc::new(RefCell::new(HashMap::new())),
             comment: String::new(),
             current_folder: String::new(),
         }
@@ -269,7 +294,7 @@ impl JSZip {
         // Getter mode: file(name) returns ZipObject
         if data.is_none() {
             let full_name = self.resolve_path(name);
-            if let Some(entry) = self.files.get(&full_name) {
+            if let Some(entry) = self.files.borrow().get(&full_name) {
                 let zip_obj = ZipObject {
                     name: entry.name.clone(),
                     dir: entry.dir,
@@ -309,7 +334,7 @@ impl JSZip {
             ..entry
         };
 
-        self.files.insert(full_name.clone(), entry);
+        self.files.borrow_mut().insert(full_name.clone(), entry);
 
         // If createFolders is true, create intermediate folders
         if file_opts.createFolders.unwrap_or(false) {
@@ -341,7 +366,7 @@ impl JSZip {
         // Create folder entry
         let full_name = self.resolve_path(&folder_name);
         let entry = ZipEntry::new_dir(full_name.clone());
-        self.files.entry(full_name.clone()).or_insert(entry);
+        self.files.borrow_mut().entry(full_name.clone()).or_insert(entry);
 
         // Return a new JSZip scoped to this folder
         let mut sub_zip = self.clone();
@@ -354,7 +379,7 @@ impl JSZip {
     #[wasm_bindgen(js_name = forEach)]
     pub fn for_each(&self, callback: &js_sys::Function) -> Result<(), JsValue> {
         let this = JsValue::NULL;
-        for (name, entry) in &self.files {
+        for (name, entry) in self.files.borrow().iter() {
             let zip_obj = ZipObject {
                 name: name.clone(),
                 dir: entry.dir,
@@ -377,7 +402,7 @@ impl JSZip {
     pub fn filter(&self, predicate: &js_sys::Function) -> Result<Array, JsValue> {
         let this = JsValue::NULL;
         let result = Array::new();
-        for (name, entry) in &self.files {
+        for (name, entry) in self.files.borrow().iter() {
             let zip_obj = ZipObject {
                 name: name.clone(),
                 dir: entry.dir,
@@ -409,7 +434,7 @@ impl JSZip {
         };
 
         // Remove exact match and all children
-        self.files.retain(|k, _| k != &full_name && !k.starts_with(&prefix));
+        self.files.borrow_mut().retain(|k, _| k != &full_name && !k.starts_with(&prefix));
 
         JsValue::from(self.clone())
     }
@@ -431,13 +456,14 @@ impl JSZip {
                 .unwrap_or(6)
                 .clamp(1, 9) as u32;
 
-            let total_files = zip_clone.files.len();
+            let total_files = zip_clone.files.borrow().len();
             let mut processed = 0;
 
             {
+                let files = zip_clone.files.borrow();
                 let mut zip_writer = zip::ZipWriter::new(&mut buf);
 
-                for (name, entry) in &zip_clone.files {
+                for (name, entry) in files.iter() {
                     if on_update.is_some() {
                         let percent = if total_files > 0 {
                             (processed as f64 / total_files as f64) * 100.0
@@ -507,6 +533,23 @@ impl JSZip {
                     }
                     Ok(arr.into())
                 }
+                "blob" => {
+                    let u8arr = Uint8Array::from(bytes.as_slice());
+                    let array = js_sys::Array::new();
+                    array.push(&u8arr);
+                    let mime_type = opts.mimeType.as_deref().unwrap_or("application/zip");
+                    let options = web_sys::BlobPropertyBag::new();
+                    options.set_type(mime_type);
+                    let blob = web_sys::Blob::new_with_buffer_source_sequence_and_options(
+                        array.as_ref(),
+                        &options,
+                    )
+                        .map_err(|_| JsValue::from_str("Failed to create Blob"))?;
+                    Ok(blob.into())
+                }
+                "nodebuffer" => {
+                    Ok(Uint8Array::from(bytes.as_slice()).into())
+                }
                 _ => Err(JsValue::from_str(&format!(
                     "Unsupported output type: {}",
                     output_type
@@ -525,6 +568,9 @@ impl JSZip {
         };
 
         let mut zip_clone = self.clone();
+        // Give the clone an independent files map so loadAsync doesn't modify the original
+        let files_copy = zip_clone.files.borrow().clone();
+        zip_clone.files = Rc::new(RefCell::new(files_copy));
 
         future_to_promise(async move {
             let bytes = js_value_to_vec_u8(&data)?;
@@ -545,7 +591,7 @@ impl JSZip {
 
                 if file.is_dir() {
                     let entry = ZipEntry::new_dir(sanitized.clone());
-                    zip_clone.files.insert(sanitized.clone(), entry);
+                    zip_clone.files.borrow_mut().insert(sanitized.clone(), entry);
                 } else {
                     let mut content = Vec::new();
                     file.read_to_end(&mut content)
@@ -558,7 +604,7 @@ impl JSZip {
                     };
 
                     let entry = ZipEntry::new_file(sanitized.clone(), content);
-                    zip_clone.files.insert(
+                    zip_clone.files.borrow_mut().insert(
                         sanitized.clone(),
                         ZipEntry {
                             unsafe_original_name: unsafe_name,
@@ -575,7 +621,7 @@ impl JSZip {
 
             // Create parent folders if requested
             if create_folders {
-                let names: Vec<String> = zip_clone.files.keys().cloned().collect();
+                let names: Vec<String> = zip_clone.files.borrow().keys().cloned().collect();
                 for name in names {
                     zip_clone.create_parent_folders(&name);
                 }
@@ -590,7 +636,7 @@ impl JSZip {
     #[wasm_bindgen(getter)]
     pub fn files(&self) -> Result<JsValue, JsValue> {
         let obj = Object::new();
-        for (name, entry) in &self.files {
+        for (name, entry) in self.files.borrow().iter() {
             let zip_obj = ZipObject {
                 name: name.clone(),
                 dir: entry.dir,
@@ -733,6 +779,7 @@ impl JSZip {
                 }
                 let folder_name = format!("{}/", current);
                 self.files
+                    .borrow_mut()
                     .entry(folder_name.clone())
                     .or_insert_with(|| ZipEntry::new_dir(folder_name));
             }
@@ -741,7 +788,7 @@ impl JSZip {
 
     fn filter_internal(&self, regex: &RegExp, only_folders: bool) -> Result<JsValue, JsValue> {
         let result = Array::new();
-        for (name, entry) in &self.files {
+        for (name, entry) in self.files.borrow().iter() {
             if only_folders && !entry.dir {
                 continue;
             }
