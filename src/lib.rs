@@ -115,14 +115,19 @@ impl CompressionMethod {
 #[derive(Serialize, Deserialize, Default)]
 struct FileOptions {
     compression: Option<String>,
-    compressionOptions: Option<CompressionOptions>,
+    #[serde(rename = "compressionOptions")]
+    compression_options: Option<CompressionOptions>,
     comment: Option<String>,
     date: Option<f64>,
     binary: Option<bool>,
-    optimizedBinaryString: Option<bool>,
-    createFolders: Option<bool>,
-    unixPermissions: Option<u32>,
-    dosPermissions: Option<u16>,
+    #[serde(rename = "optimizedBinaryString")]
+    optimized_binary_string: Option<bool>,
+    #[serde(rename = "createFolders")]
+    create_folders: Option<bool>,
+    #[serde(rename = "unixPermissions")]
+    unix_permissions: Option<u32>,
+    #[serde(rename = "dosPermissions")]
+    dos_permissions: Option<u16>,
     dir: Option<bool>,
 }
 
@@ -136,19 +141,25 @@ struct GenerateOptions {
     #[serde(rename = "type")]
     output_type: Option<String>,
     compression: Option<String>,
-    compressionOptions: Option<CompressionOptions>,
+    #[serde(rename = "compressionOptions")]
+    compression_options: Option<CompressionOptions>,
     comment: Option<String>,
-    mimeType: Option<String>,
+    #[serde(rename = "mimeType")]
+    mime_type: Option<String>,
     platform: Option<String>,
-    streamFiles: Option<bool>,
+    #[serde(rename = "streamFiles")]
+    stream_files: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
 struct LoadOptions {
     base64: Option<bool>,
-    checkCRC32: Option<bool>,
-    optimizedBinaryString: Option<bool>,
-    createFolders: Option<bool>,
+    #[serde(rename = "checkCRC32")]
+    check_crc32: Option<bool>,
+    #[serde(rename = "optimizedBinaryString")]
+    optimized_binary_string: Option<bool>,
+    #[serde(rename = "createFolders")]
+    create_folders: Option<bool>,
 }
 
 // ---------------------------------------------------------------------------
@@ -303,7 +314,7 @@ impl JSZip {
                         .map(|d| d.to_rfc3339())
                         .unwrap_or_default(),
                     comment: entry.comment.clone(),
-                    unsafe_original_name: None,
+                    unsafe_original_name: entry.unsafe_original_name.clone(),
                     data: entry.data.clone(),
                 };
                 return zip_object_to_js(&zip_obj);
@@ -323,7 +334,7 @@ impl JSZip {
             .map(CompressionMethod::from_str)
             .unwrap_or(CompressionMethod::Store);
 
-        let level = file_opts.compressionOptions.as_ref().and_then(|o| o.level);
+        let level = file_opts.compression_options.as_ref().and_then(|o| o.level);
 
         let entry = ZipEntry::new_file(full_name.clone(), bytes);
         let entry = ZipEntry {
@@ -337,7 +348,7 @@ impl JSZip {
         self.files.borrow_mut().insert(full_name.clone(), entry);
 
         // If createFolders is true, create intermediate folders
-        if file_opts.createFolders.unwrap_or(false) {
+        if file_opts.create_folders.unwrap_or(false) {
             self.create_parent_folders(&full_name);
         }
 
@@ -388,7 +399,7 @@ impl JSZip {
                     .map(|d| d.to_rfc3339())
                     .unwrap_or_default(),
                 comment: entry.comment.clone(),
-                unsafe_original_name: None,
+                unsafe_original_name: entry.unsafe_original_name.clone(),
                 data: entry.data.clone(),
             };
             let value = zip_object_to_js(&zip_obj)?;
@@ -411,7 +422,7 @@ impl JSZip {
                     .map(|d| d.to_rfc3339())
                     .unwrap_or_default(),
                 comment: entry.comment.clone(),
-                unsafe_original_name: None,
+                unsafe_original_name: entry.unsafe_original_name.clone(),
                 data: entry.data.clone(),
             };
             let value = zip_object_to_js(&zip_obj)?;
@@ -450,7 +461,7 @@ impl JSZip {
             let mut buf = Cursor::new(Vec::new());
 
             let _default_level = opts
-                .compressionOptions
+                .compression_options
                 .as_ref()
                 .and_then(|o| o.level)
                 .unwrap_or(6)
@@ -537,7 +548,7 @@ impl JSZip {
                     let u8arr = Uint8Array::from(bytes.as_slice());
                     let array = js_sys::Array::new();
                     array.push(&u8arr);
-                    let mime_type = opts.mimeType.as_deref().unwrap_or("application/zip");
+                    let mime_type = opts.mime_type.as_deref().unwrap_or("application/zip");
                     let options = web_sys::BlobPropertyBag::new();
                     options.set_type(mime_type);
                     let blob = web_sys::Blob::new_with_buffer_source_sequence_and_options(
@@ -579,7 +590,7 @@ impl JSZip {
             let mut archive = zip::ZipArchive::new(reader)
                 .map_err(|e| JsValue::from_str(&format!("Failed to open zip: {}", e)))?;
 
-            let create_folders = load_opts.createFolders.unwrap_or(false);
+            let create_folders = load_opts.create_folders.unwrap_or(false);
 
             for i in 0..archive.len() {
                 let mut file = archive.by_index(i)
@@ -645,7 +656,7 @@ impl JSZip {
                     .map(|d| d.to_rfc3339())
                     .unwrap_or_default(),
                 comment: entry.comment.clone(),
-                unsafe_original_name: None,
+                unsafe_original_name: entry.unsafe_original_name.clone(),
                 data: entry.data.clone(),
             };
             let value = zip_object_to_js(&zip_obj)?;
@@ -801,7 +812,7 @@ impl JSZip {
                         .map(|d| d.to_rfc3339())
                         .unwrap_or_default(),
                     comment: entry.comment.clone(),
-                    unsafe_original_name: None,
+                    unsafe_original_name: entry.unsafe_original_name.clone(),
                     data: entry.data.clone(),
                 };
                 let value = zip_object_to_js(&zip_obj)?;
