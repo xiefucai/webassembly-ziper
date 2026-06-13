@@ -286,7 +286,7 @@ impl JSZip {
             FileOptions::default()
         };
 
-        // Getter mode: file(name) returns ZipObject
+        // Getter mode: file(name) returns ZipObject (wasm instance with async_ method)
         if data.is_none() {
             let full_name = self.resolve_path(name);
             if let Some(entry) = self.files.borrow().get(&full_name) {
@@ -301,7 +301,7 @@ impl JSZip {
                     unsafe_original_name: entry.unsafe_original_name.clone(),
                     data: entry.data.clone(),
                 };
-                return zip_object_to_js(&zip_obj);
+                return Ok(JsValue::from(zip_obj));
             }
             return Ok(JsValue::NULL);
         }
@@ -381,7 +381,7 @@ impl JSZip {
                     .unwrap_or_default(),
                 comment: entry.comment.clone(),
                 unsafe_original_name: entry.unsafe_original_name.clone(),
-                data: entry.data.clone(),
+                data: None,
             };
             let value = zip_object_to_js(&zip_obj)?;
             callback.call2(&this, &JsValue::from_str(name), &value)?;
@@ -404,7 +404,7 @@ impl JSZip {
                     .unwrap_or_default(),
                 comment: entry.comment.clone(),
                 unsafe_original_name: entry.unsafe_original_name.clone(),
-                data: entry.data.clone(),
+                data: None,
             };
             let value = zip_object_to_js(&zip_obj)?;
             let should_include = predicate.call2(&this, &JsValue::from_str(name), &value)?;
@@ -649,7 +649,7 @@ impl JSZip {
                     .unwrap_or_default(),
                 comment: entry.comment.clone(),
                 unsafe_original_name: entry.unsafe_original_name.clone(),
-                data: entry.data.clone(),
+                data: None,
             };
             let value = zip_object_to_js(&zip_obj)?;
             js_sys::Reflect::set(&obj, &JsValue::from_str(name), &value)?;
@@ -815,7 +815,7 @@ impl JSZip {
                         .unwrap_or_default(),
                     comment: entry.comment.clone(),
                     unsafe_original_name: entry.unsafe_original_name.clone(),
-                    data: entry.data.clone(),
+                    data: None,
                 };
                 let value = zip_object_to_js(&zip_obj)?;
                 result.push(&value);
