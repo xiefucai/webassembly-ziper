@@ -37,7 +37,6 @@ struct ZipEntry {
     comment: String,
     date: Option<chrono::DateTime<chrono::Utc>>,
     compression: CompressionMethod,
-    compression_level: Option<i32>,
     unsafe_original_name: Option<String>,
 }
 
@@ -50,7 +49,6 @@ impl ZipEntry {
             comment: String::new(),
             date: Some(chrono::Utc::now()),
             compression: CompressionMethod::Store,
-            compression_level: None,
             unsafe_original_name: None,
         }
     }
@@ -68,26 +66,12 @@ impl ZipEntry {
             comment: String::new(),
             date: Some(chrono::Utc::now()),
             compression: CompressionMethod::Store,
-            compression_level: None,
             unsafe_original_name: None,
         }
     }
 
-    fn compressed_data(&self) -> Result<Vec<u8>, ZiperError> {
-        if let Some(ref data) = self.data {
-            match self.compression {
-                CompressionMethod::Store => Ok(data.clone()),
-                CompressionMethod::Deflate => {
-                    let level = self.compression_level.unwrap_or(6).clamp(1, 9) as u32;
-                    let mut encoder =
-                        flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::new(level));
-                    encoder.write_all(data)?;
-                    Ok(encoder.finish()?)
-                }
-            }
-        } else {
-            Ok(Vec::new())
-        }
+    fn raw_data(&self) -> Vec<u8> {
+        self.data.clone().unwrap_or_default()
     }
 }
 
@@ -334,13 +318,10 @@ impl JSZip {
             .map(CompressionMethod::from_str)
             .unwrap_or(CompressionMethod::Store);
 
-        let level = file_opts.compression_options.as_ref().and_then(|o| o.level);
-
         let entry = ZipEntry::new_file(full_name.clone(), bytes);
         let entry = ZipEntry {
             name: full_name.clone(),
             compression,
-            compression_level: level,
             comment: file_opts.comment.unwrap_or_default(),
             ..entry
         };
@@ -460,21 +441,30 @@ impl JSZip {
         future_to_promise(async move {
             let mut buf = Cursor::new(Vec::new());
 
-            let _default_level = opts
-                .compression_options
-                .as_ref()
-                .and_then(|o| o.level)
-                .unwrap_or(6)
-                .clamp(1, 9) as u32;
+            let global_compression = opts
+                .compression
+                .as_deref()
+                .map(CompressionMethod::from_str);
 
             let total_files = zip_clone.files.borrow().len();
             let mut processed = 0;
 
             {
                 let files = zip_clone.files.borrow();
+                let mut sorted_entries: Vec<(&String, &ZipEntry)> = files.iter().collect();
+                sorted_entries.sort_by(|a, b| {
+                    let a_depth = a.0.matches('/').count();
+                    let b_depth = b.0.matches('/').count();
+                    match (a.1.dir, b.1.dir) {
+                        (true, false) => std::cmp::Ordering::Less,
+                        (false, true) => std::cmp::Ordering::Greater,
+                        _ => a_depth.cmp(&b_depth).then_with(|| a.0.cmp(b.0)),
+                    }
+                });
+
                 let mut zip_writer = zip::ZipWriter::new(&mut buf);
 
-                for (name, entry) in files.iter() {
+                for (name, entry) in sorted_entries {
                     if on_update.is_some() {
                         let percent = if total_files > 0 {
                             (processed as f64 / total_files as f64) * 100.0
@@ -489,7 +479,9 @@ impl JSZip {
                         }
                     }
 
-                    let compression_method = match entry.compression {
+                    let effective_compression = global_compression.unwrap_or(entry.compression);
+
+                    let compression_method = match effective_compression {
                         CompressionMethod::Store => zip::CompressionMethod::Stored,
                         CompressionMethod::Deflate => zip::CompressionMethod::Deflated,
                     };
@@ -502,7 +494,7 @@ impl JSZip {
                             .add_directory(name.clone(), file_options)
                             .map_err(|e| JsValue::from_str(&format!("Zip error: {}", e)))?;
                     } else {
-                        let data = entry.compressed_data().map_err(|e| JsValue::from_str(&format!("Compression error: {}", e)))?;
+                        let data = entry.raw_data();
                         zip_writer
                             .start_file(name.clone(), file_options)
                             .map_err(|e| JsValue::from_str(&format!("Zip error: {}", e)))?;
@@ -766,13 +758,23 @@ fn sanitize_path(path: &str) -> String {
 
 impl JSZip {
     fn resolve_path(&self, name: &str) -> String {
-        if name.starts_with('/') {
+        let raw = if name.starts_with('/') {
             name.trim_start_matches('/').to_string()
         } else if self.current_folder.is_empty() {
             name.to_string()
         } else {
             format!("{}{}", self.current_folder, name)
-        }
+        };
+        let parts: Vec<&str> = raw.split('/').collect();
+        let cleaned: Vec<String> = parts
+            .iter()
+            .map(|p| {
+                p.chars()
+                    .filter(|c| !c.is_control())
+                    .collect::<String>()
+            })
+            .collect();
+        cleaned.join("/")
     }
 
     fn create_parent_folders(&mut self, path: &str) {
