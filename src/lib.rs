@@ -1,5 +1,4 @@
 use js_sys::{Array, Object, Promise, RegExp, Uint8Array};
-use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{Cursor, Read, Write};
@@ -10,14 +9,27 @@ use wasm_bindgen_futures::future_to_promise;
 // ---------------------------------------------------------------------------
 // Error type
 // ---------------------------------------------------------------------------
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum ZiperError {
-    #[error("Zip error: {0}")]
-    Zip(#[from] zip::result::ZipError),
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("Invalid argument: {0}")]
-    InvalidArgument(String),
+    Zip(zip::result::ZipError),
+    Io(std::io::Error),
+}
+
+impl std::fmt::Display for ZiperError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Zip(e) => write!(f, "Zip error: {}", e),
+            Self::Io(e) => write!(f, "IO error: {}", e),
+        }
+    }
+}
+
+impl From<zip::result::ZipError> for ZiperError {
+    fn from(e: zip::result::ZipError) -> Self { Self::Zip(e) }
+}
+
+impl From<std::io::Error> for ZiperError {
+    fn from(e: std::io::Error) -> Self { Self::Io(e) }
 }
 
 impl From<ZiperError> for JsValue {
@@ -35,7 +47,7 @@ struct ZipEntry {
     dir: bool,
     data: Option<Vec<u8>>,
     comment: String,
-    date: Option<chrono::DateTime<chrono::Utc>>,
+    date: Option<f64>,
     compression: CompressionMethod,
     unsafe_original_name: Option<String>,
 }
@@ -47,7 +59,7 @@ impl ZipEntry {
             dir: false,
             data: Some(data),
             comment: String::new(),
-            date: Some(chrono::Utc::now()),
+            date: Some(js_sys::Date::now()),
             compression: CompressionMethod::Store,
             unsafe_original_name: None,
         }
@@ -64,7 +76,7 @@ impl ZipEntry {
             dir: true,
             data: None,
             comment: String::new(),
-            date: Some(chrono::Utc::now()),
+            date: Some(js_sys::Date::now()),
             compression: CompressionMethod::Store,
             unsafe_original_name: None,
         }
@@ -94,56 +106,73 @@ impl CompressionMethod {
 }
 
 // ---------------------------------------------------------------------------
-// Options structs
+// Options structs (parsed from JS objects via Reflect)
 // ---------------------------------------------------------------------------
-#[derive(Serialize, Deserialize, Default)]
+fn get_str(obj: &JsValue, key: &str) -> Option<String> {
+    js_sys::Reflect::get(obj, &JsValue::from_str(key)).ok()?.as_string()
+}
+
+fn get_bool(obj: &JsValue, key: &str) -> Option<bool> {
+    js_sys::Reflect::get(obj, &JsValue::from_str(key)).ok()?.as_bool()
+}
+
+#[derive(Default)]
 struct FileOptions {
     compression: Option<String>,
-    #[serde(rename = "compressionOptions")]
-    compression_options: Option<CompressionOptions>,
     comment: Option<String>,
-    date: Option<f64>,
-    binary: Option<bool>,
-    #[serde(rename = "optimizedBinaryString")]
-    optimized_binary_string: Option<bool>,
-    #[serde(rename = "createFolders")]
     create_folders: Option<bool>,
-    #[serde(rename = "unixPermissions")]
-    unix_permissions: Option<u32>,
-    #[serde(rename = "dosPermissions")]
-    dos_permissions: Option<u16>,
-    dir: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Default)]
-struct CompressionOptions {
-    level: Option<i32>,
+impl FileOptions {
+    fn from_js(val: &JsValue) -> Self {
+        if val.is_undefined() || val.is_null() {
+            return Self::default();
+        }
+        Self {
+            compression: get_str(val, "compression"),
+            comment: get_str(val, "comment"),
+            create_folders: get_bool(val, "createFolders"),
+        }
+    }
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Default)]
+#[allow(dead_code)]
 struct GenerateOptions {
-    #[serde(rename = "type")]
     output_type: Option<String>,
     compression: Option<String>,
-    #[serde(rename = "compressionOptions")]
-    compression_options: Option<CompressionOptions>,
     comment: Option<String>,
-    #[serde(rename = "mimeType")]
     mime_type: Option<String>,
-    platform: Option<String>,
-    #[serde(rename = "streamFiles")]
-    stream_files: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+impl GenerateOptions {
+    fn from_js(val: &JsValue) -> Self {
+        if val.is_undefined() || val.is_null() {
+            return Self::default();
+        }
+        Self {
+            output_type: get_str(val, "type"),
+            compression: get_str(val, "compression"),
+            comment: get_str(val, "comment"),
+            mime_type: get_str(val, "mimeType"),
+        }
+    }
+}
+
+#[derive(Default)]
 struct LoadOptions {
-    base64: Option<bool>,
-    #[serde(rename = "checkCRC32")]
-    check_crc32: Option<bool>,
-    #[serde(rename = "optimizedBinaryString")]
-    optimized_binary_string: Option<bool>,
-    #[serde(rename = "createFolders")]
     create_folders: Option<bool>,
+}
+
+impl LoadOptions {
+    fn from_js(val: &JsValue) -> Self {
+        if val.is_undefined() || val.is_null() {
+            return Self::default();
+        }
+        Self {
+            create_folders: get_bool(val, "createFolders"),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -280,8 +309,8 @@ impl JSZip {
     // ---- file(name, data [, options]) -> JSZip ----
     #[wasm_bindgen]
     pub fn file(&mut self, name: &str, data: Option<JsValue>, options: Option<JsValue>) -> Result<JsValue, JsValue> {
-        let file_opts = if let Some(opts) = options {
-            serde_wasm_bindgen::from_value::<FileOptions>(opts).unwrap_or_default()
+        let file_opts = if let Some(ref opts) = options {
+            FileOptions::from_js(opts)
         } else {
             FileOptions::default()
         };
@@ -295,7 +324,7 @@ impl JSZip {
                     dir: entry.dir,
                     date: entry
                         .date
-                        .map(|d| d.to_rfc3339())
+                        .map(|d| js_sys::Date::new(&JsValue::from_f64(d)).to_iso_string().into())
                         .unwrap_or_default(),
                     comment: entry.comment.clone(),
                     unsafe_original_name: entry.unsafe_original_name.clone(),
@@ -377,7 +406,7 @@ impl JSZip {
                 dir: entry.dir,
                 date: entry
                     .date
-                    .map(|d| d.to_rfc3339())
+                    .map(|d| js_sys::Date::new(&JsValue::from_f64(d)).to_iso_string().into())
                     .unwrap_or_default(),
                 comment: entry.comment.clone(),
                 unsafe_original_name: entry.unsafe_original_name.clone(),
@@ -400,7 +429,7 @@ impl JSZip {
                 dir: entry.dir,
                 date: entry
                     .date
-                    .map(|d| d.to_rfc3339())
+                    .map(|d| js_sys::Date::new(&JsValue::from_f64(d)).to_iso_string().into())
                     .unwrap_or_default(),
                 comment: entry.comment.clone(),
                 unsafe_original_name: entry.unsafe_original_name.clone(),
@@ -434,7 +463,7 @@ impl JSZip {
     // ---- generateAsync(options) -> Promise ----
     #[wasm_bindgen(js_name = generateAsync)]
     pub fn generate_async(&self, options: JsValue, on_update: Option<js_sys::Function>) -> Promise {
-        let opts = serde_wasm_bindgen::from_value::<GenerateOptions>(options).unwrap_or_default();
+        let opts = GenerateOptions::from_js(&options);
         let zip_clone = self.clone();
         let on_update = on_update.clone();
 
@@ -564,8 +593,8 @@ impl JSZip {
     // ---- loadAsync(data [, options]) -> Promise<JSZip> ----
     #[wasm_bindgen(js_name = loadAsync)]
     pub fn load_async(&self, data: JsValue, options: Option<JsValue>) -> Promise {
-        let load_opts = if let Some(opts) = options {
-            serde_wasm_bindgen::from_value::<LoadOptions>(opts).unwrap_or_default()
+        let load_opts = if let Some(ref opts) = options {
+            LoadOptions::from_js(opts)
         } else {
             LoadOptions::default()
         };
@@ -645,7 +674,7 @@ impl JSZip {
                 dir: entry.dir,
                 date: entry
                     .date
-                    .map(|d| d.to_rfc3339())
+                    .map(|d| js_sys::Date::new(&JsValue::from_f64(d)).to_iso_string().into())
                     .unwrap_or_default(),
                 comment: entry.comment.clone(),
                 unsafe_original_name: entry.unsafe_original_name.clone(),
@@ -811,7 +840,7 @@ impl JSZip {
                     dir: entry.dir,
                     date: entry
                         .date
-                        .map(|d| d.to_rfc3339())
+                        .map(|d| js_sys::Date::new(&JsValue::from_f64(d)).to_iso_string().into())
                         .unwrap_or_default(),
                     comment: entry.comment.clone(),
                     unsafe_original_name: entry.unsafe_original_name.clone(),
